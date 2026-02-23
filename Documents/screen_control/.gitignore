@@ -1,0 +1,21 @@
+# Virtual environment
+venv/
+
+# Build artifacts
+build/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
