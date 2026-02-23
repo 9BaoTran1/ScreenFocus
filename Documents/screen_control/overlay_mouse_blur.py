@@ -10,7 +10,30 @@ import win32gui
 import win32api
 
 
-WINDOW_NAME = "Mouse Blur Overlay - Press 'q' to quit"
+# --- Double-tap state ---
+DOUBLE_TAP_INTERVAL = 0.4
+_last_press_time = {}
+_pending_actions = []
+
+def _on_key_press(event):
+    """Detect double-tap and queue actions."""
+    if event.event_type != keyboard.KEY_DOWN:
+        return
+    key = event.name
+    now = time.time()
+    
+    if key in ('q', 'z', 'w'):
+        last = _last_press_time.get(key, 0)
+        if now - last < DOUBLE_TAP_INTERVAL:
+            _pending_actions.append(key)
+            _last_press_time[key] = 0  # reset
+        else:
+            _last_press_time[key] = now
+
+# Register globally
+keyboard.on_press(_on_key_press)
+
+WINDOW_NAME = "Mouse Blur Overlay - Double press 'q' to quit"
 
 
 def get_overlay_hwnd():
@@ -83,6 +106,14 @@ def run_overlay():
     hwnd = get_overlay_hwnd()
     set_window_topmost(hwnd)
 
+    # Exclude overlay from screen capture so update_background() captures actual desktop
+    try:
+        import ctypes
+        WDA_EXCLUDEFROMCAPTURE = 0x00000011
+        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+    except Exception as e:
+        print(f"Warning: Could not set window display affinity: {e}")
+
     # Setup Chroma Key (Green)
     # Windows renders this color as fully transparent (visual + input)
     # provided we use LWA_COLORKEY.
@@ -123,10 +154,10 @@ def run_overlay():
     dark_mode = False
 
     print("Controls:")
-    print("  'q': Quit")
+    print("  'q' + 'q': Quit")
     print("  'r': Refresh (Manual)")
-    print("  'w': Toggle Smart Focus (Auto-Window)")
-    print("  'z': Toggle Dark Mode")
+    print("  'w' + 'w': Toggle Smart Focus (Auto-Window)")
+    print("  'z' + 'z': Toggle Dark Mode")
     print("  '[' / ']': Resize focus area")
 
     def update_background(sct, monitor):
@@ -208,30 +239,30 @@ def run_overlay():
 
             cv2.imshow(WINDOW_NAME, composed)
 
-            # Check for 'q' to quit using keyboard library
-            if keyboard.is_pressed('q'):
+            # Process double-tap actions
+            running = True
+            while _pending_actions:
+                action = _pending_actions.pop(0)
+                if action == 'q':
+                    running = False
+                elif action == 'w':
+                    smart_focus_mode = not smart_focus_mode
+                    if not smart_focus_mode:
+                        # Reset to default size when turning off
+                        focus_w = 800
+                        focus_h = 600
+                    print(f"Smart Focus: {'ON' if smart_focus_mode else 'OFF'}")
+                elif action == 'z':
+                    dark_mode = not dark_mode
+                    print(f"Dark Mode: {'ON' if dark_mode else 'OFF'}")
+                    # Must update immediately to show the new visual style
+                    frame_base, blurred_base = update_background(sct, monitor)
+
+            if not running:
                 break
                 
-            # 'r' to Refresh (Manual)
+            # 'r' to Refresh (Manual) - single press
             if keyboard.is_pressed('r'):
-                frame_base, blurred_base = update_background(sct, monitor)
-                time.sleep(0.3)
-            
-            # 'w' to toggle Smart Focus
-            if keyboard.is_pressed('w'):
-                smart_focus_mode = not smart_focus_mode
-                if not smart_focus_mode:
-                    # Reset to default size when turning off
-                    focus_w = 800
-                    focus_h = 600
-                print(f"Smart Focus: {'ON' if smart_focus_mode else 'OFF'}")
-                time.sleep(0.3) # Debounce
-                
-            # 'z' to toggle Dark Mode
-            if keyboard.is_pressed('z'):
-                dark_mode = not dark_mode
-                print(f"Dark Mode: {'ON' if dark_mode else 'OFF'}")
-                # Must update immediately to show the new visual style
                 frame_base, blurred_base = update_background(sct, monitor)
                 time.sleep(0.3)
 
@@ -248,6 +279,7 @@ def run_overlay():
             
             cv2.waitKey(1)
 
+    keyboard.unhook_all()
     cv2.destroyAllWindows()
 
 
